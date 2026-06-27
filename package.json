@@ -4,11 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/increment-build-version.mjs",
     "dev": "vite --host 127.0.0.1 --port 4577",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4577",
     "runner": "node scripts/runner-server.mjs",
-    "setup:browsers": "playwright install chromium ffmpeg"
+    "setup:browsers": "playwright install chromium"
   },
   "dependencies": {
     "@awesome.me/webawesome": "^3.5.0",

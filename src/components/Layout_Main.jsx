@@ -80,6 +80,7 @@ function InstructionTreeItem({ node }) {
 
 export default function Layout_Main({ onEdit, onRecordings, onRun, project, runIsRunning = false, scenario }) {
   const instructionTreeRef = useRef(null);
+  const projectFrameRef = useRef(null);
   const instructionTree = useMemo(
     () => parseInstructionTree(scenario?.instructions),
     [scenario?.instructions]
@@ -87,6 +88,7 @@ export default function Layout_Main({ onEdit, onRecordings, onRun, project, runI
   const instructionTreeKey = `${scenario?.id || "scenario"}:${scenario?.instructions || ""}`;
   const captureWidth = Number(project?.capture?.width || defaultCapture.width);
   const captureHeight = Number(project?.capture?.height || defaultCapture.height);
+  const captureAspectRatio = Number((captureWidth / captureHeight).toFixed(6));
   const frameStyle = {
     "--project-frame-width": captureWidth,
     "--project-frame-height": captureHeight
@@ -117,6 +119,48 @@ export default function Layout_Main({ onEdit, onRecordings, onRun, project, runI
     };
   }, [instructionTreeKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let resizeObserver;
+    let resizeFrame;
+
+    async function fitProjectFrame() {
+      await customElements.whenDefined("wa-zoomable-frame");
+      await projectFrameRef.current?.updateComplete;
+      if (cancelled || !projectFrameRef.current) return;
+
+      const frame = projectFrameRef.current;
+      const updateZoom = () => {
+        const bounds = frame.getBoundingClientRect();
+        const sourceAspectRatio = Number(frame.dataset.aspectRatio);
+        const sourceWidth = Number(frame.dataset.frameWidth);
+        const sourceHeight = Number(frame.dataset.frameHeight);
+
+        if (!bounds.width || !bounds.height || !sourceAspectRatio || !sourceWidth || !sourceHeight) return;
+
+        const widthIsLimiting = bounds.width / bounds.height <= sourceAspectRatio;
+        const nextZoom = Math.min(
+          1,
+          widthIsLimiting ? bounds.width / sourceWidth : bounds.height / sourceHeight
+        );
+
+        frame.zoom = Number(nextZoom.toFixed(6));
+      };
+
+      resizeObserver = new ResizeObserver(updateZoom);
+      resizeObserver.observe(frame);
+      resizeFrame = requestAnimationFrame(updateZoom);
+    }
+
+    fitProjectFrame();
+
+    return () => {
+      cancelled = true;
+      resizeObserver?.disconnect();
+      cancelAnimationFrame(resizeFrame);
+    };
+  }, [captureHeight, captureWidth, runIsRunning]);
+
   return (
     <main className="app-main" aria-label="Scenario workspace">
       {scenario ? (
@@ -127,15 +171,17 @@ export default function Layout_Main({ onEdit, onRecordings, onRun, project, runI
 
           <div className="capture-area">
             <wa-zoomable-frame
+              ref={projectFrameRef}
+              key={runIsRunning ? "live-preview" : "project-preview"}
               class="project-frame"
               src={frameUrl}
               style={frameStyle}
+              data-aspect-ratio={captureAspectRatio}
               data-frame-width={captureWidth}
               data-frame-height={captureHeight}
               data-live-preview={runIsRunning ? "true" : "false"}
               without-controls
               without-interaction={runIsRunning || undefined}
-              zoom="1"
             ></wa-zoomable-frame>
           </div>
 

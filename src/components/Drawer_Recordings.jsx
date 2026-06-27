@@ -95,8 +95,7 @@ export default function Drawer_Recordings({ project, scenario, onCancel }) {
   const captureHeight = Number(project?.capture?.height || defaultCapture.height);
   const carouselStyle = {
     "--previous-video-width": captureWidth,
-    "--previous-video-height": captureHeight,
-    "--aspect-ratio": `${captureWidth} / ${captureHeight}`
+    "--previous-video-height": captureHeight
   };
 
   useEffect(() => {

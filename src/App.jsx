@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import Drawer_Edit from "./components/Drawer_Edit.jsx";
+import Drawer_Edit, { SCENARIO_SAVE_ICON } from "./components/Drawer_Edit.jsx";
 import Drawer_Project from "./components/Drawer_Project.jsx";
 import Drawer_Recordings from "./components/Drawer_Recordings.jsx";
 import Drawer_Shell from "./components/Drawer_Shell.jsx";
@@ -8,6 +8,7 @@ import Layout_Header from "./components/Layout_Header.jsx";
 import Layout_Navigation from "./components/Layout_Navigation.jsx";
 import Layout_Main from "./components/Layout_Main.jsx";
 import { cancelRun, getPlaywrightStatus, getProjects, removeProject, runScenario, savePreferences, saveProject, saveScenario } from "./lib/projectsClient.js";
+import releaseNotes from "../release-notes.md?raw";
 
 export default function App() {
   const setupDialogRef = useRef(null);
@@ -155,7 +156,13 @@ export default function App() {
     if (!drawer.project?.id) return;
 
     try {
-      setStatus({ state: "saving", message: "Saving scenario..." });
+      setStatus({
+        state: "saving",
+        message: "Saving scenario...",
+        duration: drawer.type === "edit" ? 1500 : undefined,
+        icon: SCENARIO_SAVE_ICON,
+        spin: false
+      });
       const body = await saveScenario(drawer.project.id, scenario);
       const selection = getInitialSelection(body.projects || [], body.preferences || {
         projectId: drawer.project.id,
@@ -239,11 +246,11 @@ export default function App() {
       ? "brand"
       : "success";
   const statusIsBusy = status.state === "running" || status.state === "saving" || status.state === "loading" || status.state === "cancelling";
-  const statusToastIcon = status.state === "error"
+  const statusToastIcon = status.icon || (status.state === "error"
     ? "circle-exclamation"
     : statusIsBusy
       ? "circle-notch"
-      : "circle-check";
+      : "circle-check");
 
   useEffect(() => {
     let cancelled = false;
@@ -255,7 +262,7 @@ export default function App() {
       if (cancelled || !toastRef.current) return;
 
       const toastItem = await toastRef.current.create(status.message, {
-        duration: status.showVideo ? 10000 : status.state === "error" ? 7000 : 5000,
+        duration: status.duration ?? (status.showVideo ? 10000 : status.state === "error" ? 7000 : 5000),
         variant: statusToastVariant
       });
 
@@ -268,7 +275,7 @@ export default function App() {
       icon.slot = "icon";
       icon.name = statusToastIcon;
       icon.variant = "solid";
-      if (statusIsBusy) icon.animation = "spin";
+      if (statusIsBusy && status.spin !== false) icon.animation = "spin";
       toastItem.prepend(icon);
 
       if (status.showVideo) {
@@ -290,7 +297,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [status.message, status.showVideo, status.state, statusIsBusy, statusToastIcon, statusToastVariant]);
+  }, [status.duration, status.message, status.showVideo, status.spin, status.state, statusIsBusy, statusToastIcon, statusToastVariant]);
 
   return (
     <>
@@ -316,6 +323,12 @@ export default function App() {
       </wa-page>
 
       <wa-toast ref={toastRef} class="status-toast" placement="top-end"></wa-toast>
+
+      <wa-dialog id="release-notes-dialog" label="Release notes" class="release-notes-dialog">
+        <wa-markdown>
+          <script type="text/markdown">{releaseNotes}</script>
+        </wa-markdown>
+      </wa-dialog>
 
       <Drawer_Shell open={Boolean(drawer.type)} label={drawerLabel} onClose={closeDrawer}>
         {drawer.type === "project" ? (

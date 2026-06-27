@@ -2,7 +2,7 @@
 
 ## User Preferences
 - project: customer-web-app
-- scenario: smoke-test
+- scenario: smoke-test-2
 
 ## Project: Customer Web App
 - id: customer-web-app
@@ -56,6 +56,25 @@ await termsDialog.getByRole("button", { name: "Close" }).click();
 await termsDialog.waitFor({ state: "hidden" });
 
 await setupDialog.getByRole("button", { name: "Continue" }).click();
+```
+
+### Scenario: Front Page Test
+- id: smoke-test-2
+```instructions
+- Open App:
+	- Wait 2 seconds
+	- Tap Button: Set up Business Cash Flow
+- Wait for Set up Business Cash Flow Drawer
+	- Wait 2 seconds
+	- Tap Input: Your name
+		- Type: Janet Denbeigh
+```
+```script
+await page.goto(project.url, { waitUntil: "networkidle" });
+await page.waitForTimeout(2000);
+await page.getByRole("button", { name: "Set up Business Cash Flow" }).click();
+
+await page.waitForTimeout(2000);
 ```
 
 ## Project: Ubiqular Mobile

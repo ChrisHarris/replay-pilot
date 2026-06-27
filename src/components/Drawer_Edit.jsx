@@ -2,6 +2,8 @@ import { useEffect, useId, useRef } from "react";
 import { handleDrawerFormKeyDown } from "./Utitlity_Keyboard.js";
 import { normaliseInstructionIndentation } from "../lib/instructionFormatting.js";
 
+export const SCENARIO_SAVE_ICON = "down-from-dotted-line";
+
 export const defaultScenarioInstructions = `# Open App
 - Open App:
 \t- Append to url: /?qr=demo-ticket#demo
@@ -88,7 +90,7 @@ export default function Drawer_Edit({ scenario, onCancel, onSave }) {
           Cancel
         </wa-button>
         <wa-button size="m" variant="neutral" pill appearance="accent" type="submit" form={formId}>
-          <wa-icon slot="start" name="down-from-dotted-line" variant="solid" aria-hidden="true"></wa-icon>
+          <wa-icon slot="start" name={SCENARIO_SAVE_ICON} variant="solid" aria-hidden="true"></wa-icon>
           Save
         </wa-button>
       </div>

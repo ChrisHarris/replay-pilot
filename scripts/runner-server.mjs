@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { createServer } from "node:http";
 import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import ffmpegStaticPath from "ffmpeg-static";
 import { chromium } from "playwright";
@@ -17,6 +17,7 @@ const apiPort = Number(process.env.REPLAY_PILOT_API_PORT || 4578);
 const uiPort = Number(process.env.REPLAY_PILOT_UI_PORT || 4577);
 const host = "127.0.0.1";
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const captureFps = 30;
 
 let currentRun = null;
 let currentRunControl = null;
@@ -98,18 +99,107 @@ function finishLivePreview() {
   broadcastLivePreviewEvent("finished");
 }
 
-async function startPlaywrightScreencast(page, viewport) {
+function createMp4FrameRecorder(outputPath) {
+  const ffmpeg = spawn(getFfmpegPath(), [
+    "-y",
+    "-loglevel", "error",
+    "-f", "image2pipe",
+    "-framerate", String(captureFps),
+    "-vcodec", "mjpeg",
+    "-i", "pipe:0",
+    "-an",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-tune", "zerolatency",
+    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:black",
+    "-pix_fmt", "yuv420p",
+    "-r", String(captureFps),
+    "-movflags", "+faststart",
+    outputPath
+  ], { stdio: ["pipe", "ignore", "pipe"] });
+
+  let aborted = false;
+  let frameCount = 0;
+  let latestFrame = null;
+  let latestFrameData = "";
+  let timer = null;
+  let stderr = "";
+
+  ffmpeg.stderr.on("data", (data) => {
+    stderr += data.toString("utf8");
+  });
+  ffmpeg.stdin.on("error", (error) => {
+    if (!aborted) stderr += `${stderr ? "\n" : ""}${error.message}`;
+  });
+
+  const completion = new Promise((resolvePromise, reject) => {
+    ffmpeg.on("error", reject);
+    ffmpeg.on("close", (exitCode) => {
+      if (aborted || exitCode === 0) {
+        resolvePromise();
+        return;
+      }
+      reject(new Error(stderr.trim() || `FFmpeg exited with code ${exitCode}`));
+    });
+  });
+  completion.catch(() => {});
+
+  function writeFrame() {
+    if (!latestFrame || ffmpeg.stdin.destroyed || ffmpeg.stdin.writableEnded) return;
+    ffmpeg.stdin.write(latestFrame);
+    frameCount += 1;
+    livePreviewFrame = latestFrameData;
+    broadcastLivePreviewEvent("frame", latestFrameData);
+  }
+
+  return {
+    updateFrame(data) {
+      if (aborted) return;
+      latestFrameData = data;
+      latestFrame = Buffer.from(data, "base64");
+      if (timer) return;
+
+      writeFrame();
+      timer = setInterval(writeFrame, 1000 / captureFps);
+    },
+    async stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+
+      if (aborted) {
+        await completion;
+        return { frameCount: 0 };
+      }
+      if (!latestFrame || frameCount === 0) {
+        ffmpeg.stdin.destroy();
+        ffmpeg.kill("SIGTERM");
+        await completion.catch(() => {});
+        throw new Error("Chromium did not produce any screencast frames.");
+      }
+
+      ffmpeg.stdin.end();
+      await completion;
+      return { frameCount };
+    },
+    async abort() {
+      if (!aborted) {
+        aborted = true;
+        if (timer) clearInterval(timer);
+        timer = null;
+        ffmpeg.stdin.destroy();
+        ffmpeg.kill("SIGTERM");
+      }
+      await completion.catch(() => {});
+    }
+  };
+}
+
+async function startPlaywrightScreencast(page, viewport, onFrame) {
   const session = await page.context().newCDPSession(page);
-  let lastFrameAt = 0;
 
   session.on("Page.screencastFrame", ({ data, sessionId }) => {
     session.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
-
-    const now = Date.now();
-    if (now - lastFrameAt < 80) return;
-    lastFrameAt = now;
-    livePreviewFrame = data;
-    broadcastLivePreviewEvent("frame", data);
+    onFrame(data);
   });
 
   await session.send("Page.startScreencast", {
@@ -126,42 +216,16 @@ async function startPlaywrightScreencast(page, viewport) {
   };
 }
 
-function getPlaywrightCacheDir() {
-  const executablePath = chromium.executablePath();
-  const pathParts = executablePath.split(sep);
-  const cacheIndex = pathParts.lastIndexOf("ms-playwright");
-  return cacheIndex >= 0 ? pathParts.slice(0, cacheIndex + 1).join(sep) : "";
-}
-
-async function getPlaywrightFfmpegPath() {
-  const cacheDir = getPlaywrightCacheDir();
-  const cacheEntries = cacheDir ? await readdir(cacheDir).catch(() => []) : [];
-  const ffmpegDir = cacheEntries
-    .filter((entry) => entry.startsWith("ffmpeg-"))
-    .sort()
-    .at(-1);
-
-  if (!ffmpegDir) return "ffmpeg";
-
-  const ffmpegPath = join(cacheDir, ffmpegDir, process.platform === "win32" ? "ffmpeg-win64.exe" : process.platform === "darwin" ? "ffmpeg-mac" : "ffmpeg-linux");
-  return await pathExists(ffmpegPath) ? ffmpegPath : "ffmpeg";
-}
-
-function getH264FfmpegPath() {
+function getFfmpegPath() {
   return ffmpegStaticPath || "ffmpeg";
 }
 
 async function checkPlaywrightInstall() {
   const executablePath = chromium.executablePath();
-  const cacheDir = getPlaywrightCacheDir();
-  const cacheEntries = cacheDir ? await readdir(cacheDir).catch(() => []) : [];
-  const playwrightFfmpegPath = await getPlaywrightFfmpegPath();
-  const h264FfmpegPath = getH264FfmpegPath();
+  const ffmpegPath = getFfmpegPath();
   const checks = {
     chromium: await pathExists(executablePath),
-    headlessShell: cacheEntries.some((entry) => entry.startsWith("chromium_headless_shell-")),
-    playwrightFfmpeg: playwrightFfmpegPath !== "ffmpeg" || cacheEntries.some((entry) => entry.startsWith("ffmpeg-")),
-    h264Ffmpeg: await pathExists(h264FfmpegPath)
+    ffmpeg: await pathExists(ffmpegPath)
   };
   const ok = Object.values(checks).every(Boolean);
 
@@ -171,8 +235,7 @@ async function checkPlaywrightInstall() {
     checks,
     details: ok ? "" : "Replay Pilot recording tools are missing.",
     executablePath,
-    playwrightFfmpegPath,
-    h264FfmpegPath
+    ffmpegPath
   };
 }
 
@@ -476,40 +539,6 @@ function sanitizeFilename(value) {
   return slugify(value).replace(/^-+|-+$/g, "") || "run";
 }
 
-function runProcess(command, args) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-
-    child.stderr.on("data", (data) => {
-      stderr += data.toString("utf8");
-    });
-    child.on("error", reject);
-    child.on("close", (exitCode) => {
-      if (exitCode === 0) {
-        resolvePromise();
-        return;
-      }
-
-      reject(new Error(stderr.trim() || `${command} exited with code ${exitCode}`));
-    });
-  });
-}
-
-async function convertWebmToMp4(webmPath, mp4Path) {
-  const ffmpegPath = getH264FfmpegPath();
-  await runProcess(ffmpegPath, [
-    "-y",
-    "-i", webmPath,
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-pix_fmt", "yuv420p",
-    "-movflags", "+faststart",
-    "-an",
-    mp4Path
-  ]);
-}
-
 async function runScenario(projectId, scenarioId) {
   if (currentRun) throw new Error("A scenario is already running.");
 
@@ -517,48 +546,49 @@ async function runScenario(projectId, scenarioId) {
     runDir: "",
     browser: null,
     cancelRequested: false,
-    context: null
+    context: null,
+    recorder: null
   };
 
   currentRun = (async () => {
     const { project, scenario, projects } = await ensureScenarioScript(projectId, scenarioId);
     const runId = new Date().toISOString().replace(/[:.]/g, "-");
     const runDir = join(activeProjectFolderPath(project), runId);
-    const videoDir = join(runDir, "video");
     control.runDir = runDir;
-    await mkdir(videoDir, { recursive: true });
+    await mkdir(runDir, { recursive: true });
 
     const viewport = {
       width: Number(project.capture?.width || defaultCapture.width),
       height: Number(project.capture?.height || defaultCapture.height)
     };
     const deviceScaleFactor = Number(project.capture?.resolution || defaultCapture.resolution);
+    const mp4Filename = `${sanitizeFilename(scenario.name)}.mp4`;
+    const finalMp4Path = join(runDir, mp4Filename);
+    const pendingMp4Path = join(runDir, `${sanitizeFilename(scenario.name)}.pending.mp4`);
     const browser = await chromium.launch({ headless: true });
     beginLivePreview();
     control.browser = browser;
-    let videoPath = "";
+    const recorder = createMp4FrameRecorder(pendingMp4Path);
+    control.recorder = recorder;
+    let recordingSaved = false;
     let screenshotPath = "";
     let runError = null;
 
     try {
       if (control.cancelRequested) throw new Error("Recording cancelled.");
-      const context = await browser.newContext({
-        viewport,
-        deviceScaleFactor,
-        recordVideo: {
-          dir: videoDir,
-          size: viewport
-        }
-      });
+      const context = await browser.newContext({ viewport, deviceScaleFactor });
       control.context = context;
       const page = await context.newPage();
-      const stopScreencast = await startPlaywrightScreencast(page, viewport).catch(() => async () => {});
+      let stopScreencast = async () => {};
+      try {
+        stopScreencast = await startPlaywrightScreencast(page, viewport, recorder.updateFrame);
+      } catch (error) {
+        runError = error;
+      }
       const helpers = {
         wait: (ms) => page.waitForTimeout(ms),
         seconds: (seconds) => page.waitForTimeout(seconds * 1000)
       };
-      const video = page.video();
-
       try {
         if (control.cancelRequested) throw new Error("Recording cancelled.");
         await createScriptRunner(scenario.script)(page, project, scenario, expect, helpers);
@@ -570,13 +600,24 @@ async function runScenario(projectId, scenarioId) {
           await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {});
         }
         await stopScreencast();
+        if (!control.cancelRequested) {
+          try {
+            await recorder.stop();
+            await rename(pendingMp4Path, finalMp4Path);
+            recordingSaved = true;
+          } catch (error) {
+            await rm(pendingMp4Path, { force: true }).catch(() => {});
+            runError = error;
+          }
+        }
         await context.close().catch(() => {});
         control.context = null;
-        videoPath = !control.cancelRequested && video ? await video.path().catch(() => "") : "";
       }
     } finally {
+      if (!recordingSaved) await recorder.abort();
       await browser.close().catch(() => {});
       control.browser = null;
+      control.recorder = null;
       finishLivePreview();
     }
 
@@ -596,29 +637,15 @@ async function runScenario(projectId, scenarioId) {
       };
     }
 
-    const videoFilename = `${sanitizeFilename(scenario.name)}.webm`;
-    const mp4Filename = `${sanitizeFilename(scenario.name)}.mp4`;
-    const finalVideoPath = join(runDir, videoFilename);
-    const finalMp4Path = join(runDir, mp4Filename);
-    if (videoPath) {
-      await rename(videoPath, finalVideoPath);
-      await rm(videoDir, { recursive: true, force: true });
-      await convertWebmToMp4(finalVideoPath, finalMp4Path).catch((error) => {
-        runError = error;
-      });
-    } else if (!runError) {
-      runError = new Error("Playwright did not produce a video recording.");
-    }
-
-    const relativeRunPath = `${project.id}/${runId}/${videoFilename}`;
     const relativeMp4Path = `${project.id}/${runId}/${mp4Filename}`;
+    const recordingUrl = recordingSaved ? `/recordings/${relativeMp4Path}` : undefined;
     const run = {
       id: runId,
       projectId: project.id,
       scenarioId: scenario.id,
       status: runError ? "failed" : "passed",
-      videoUrl: `/recordings/${relativeRunPath}`,
-      mp4Url: `/recordings/${relativeMp4Path}`,
+      videoUrl: recordingUrl,
+      mp4Url: recordingUrl,
       screenshotUrl: screenshotPath ? `/recordings/${project.id}/${runId}/${sanitizeFilename(scenario.name)}.png` : undefined,
       viewport,
       deviceScaleFactor,
@@ -654,6 +681,7 @@ async function cancelRun() {
   }
 
   currentRunControl.cancelRequested = true;
+  await currentRunControl.recorder?.abort();
   await currentRunControl.context?.close().catch(() => {});
   await currentRunControl.browser?.close().catch(() => {});
 
