@@ -1,32 +1,25 @@
-# ReplayPilot
+# Replay Pilot
 
-ReplayPilot is a standalone local automation cockpit for running browser test and release-video scenarios against apps on localhost, staging, or release-candidate URLs.
+Replay Pilot is a local Web Awesome/React app for managing projects, editing scenario instructions, and recording Playwright videos.
 
-## Run Locally
+## Setup
+
+Install dependencies:
 
 ```bash
 npm install
+```
+
+Install the Playwright browser binaries used for scenario recording. The H.264 MP4 converter is installed by `npm install`.
+
+```bash
+npm run setup:browsers
+```
+
+Start Replay Pilot:
+
+```bash
 npm run runner
 ```
 
-The runner starts:
-
-- UI: `http://127.0.0.1:4577`
-- API: `http://127.0.0.1:4578`
-
-Point the UI at an app such as `http://127.0.0.1:5173`, choose a scenario pack, and start a run.
-
-## Structure
-
-```text
-src/components/Card_*.jsx      Page cards
-src/components/Drawer_*.jsx    Drawer details and editing surfaces
-src/data/scenarios.js          Scenario metadata
-src/lib/runnerClient.js        Browser-to-runner API client
-src/styles/theme.css           Single brand color variable
-src/styles/app.css             Layout and component composition
-scripts/runner-server.mjs      Local runner bridge
-tests/scenarios/*.spec.js      Playwright scenario packs
-```
-
-The app under test stays separate. ReplayPilot only needs a URL it can open in Playwright.
+The runner starts the local API and the Vite app. If the recording tools are missing, Replay Pilot will show setup instructions in the app.

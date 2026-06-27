@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en" data-fa-kit-code="6bf5f7604b">
+<head>
+	<meta charset="UTF-8">
+	<title>untitled</title>
+
+<!-- Theme + color palette -->
+<link
+  rel="stylesheet"
+  href="https://ka-p.webawesome.com/kit/f2a5b8ebd67b4bab/webawesome@3.9.0/styles/themes/default.css"
+/>
+
+<!-- Native styles/CSS reset -->
+<link rel="stylesheet" href="https://ka-p.webawesome.com/kit/f2a5b8ebd67b4bab/webawesome@3.9.0/styles/native.css" />
+
+<!-- CSS utilities -->
+<link rel="stylesheet" href="https://ka-p.webawesome.com/kit/f2a5b8ebd67b4bab/webawesome@3.9.0/styles/utilities.css" />
+
+<!-- Web Awesome autoloader -->
+
+<script src="https://kit.webawesome.com/f2a5b8ebd67b4bab.js" crossorigin="anonymous"></script>
+
+
+<style>
+	html,
+	body {
+	  block-size: 100%;
+	  min-height: 100%;
+	  padding: 0;
+	  margin: 0;
+	  overflow: hidden;
+	}
+
+	body {
+		min-block-size: 100dvh;
+	}
+
+:root {
+
+	--shadow-color: 0, 0, 0;
+	--ob-shadow-card: 0 8px 30px rgba( var(--shadow-color), 0.1), 0 4px 15px rgba( var(--shadow-color), 0.1);
+}
+
+/* Font Size Utilities */
+.font-size-2xs {font-size:var(--wa-font-size-2xs);}
+.font-size-xs {font-size:var(--wa-font-size-xs);}
+.font-size-s {font-size:var(--wa-font-size-s);}
+.font-size-m {font-size:var(--wa-font-size-m);}
+.font-size-l {font-size:var(--wa-font-size-l);}
+.font-size-xl {font-size:var(--wa-font-size-xl);}
+.font-size-2xl {font-size:var(--wa-font-size2xl);}
+
+.font-family-heading {font-family:var(--wa-font-family-heading);}
+.font-family-body {font-family:var(--wa-font-family-body);}
+
+.font-weight-bold {font-weight:bold;}
+
+		wa-page {
+			--menu-width: 16rem;
+			block-size: 100dvh;
+			min-block-size: 0;
+		}
+		wa-page::part(navigation-toggle) {
+			order:1;
+			margin-right:var(--wa-space-m);
+			font-size: var(--wa-font-size-m);
+			color: white;
+		}
+
+		wa-page::part(navigation-toggle-icon) {
+			color: white;
+		}
+
+		wa-page[view='mobile'] {
+			--menu-width: auto;
+		}
+
+		wa-page::part(header) {
+			background: var(--wa-color-neutral-on-normal);
+			color: white;
+		}
+
+		wa-page::part(base),
+		wa-page::part(body),
+		wa-page::part(main-content) {
+			min-block-size: 0;
+		}
+
+		wa-page::part(base) {
+			block-size: 100%;
+		}
+
+		wa-page::part(body),
+		wa-page::part(main-content) {
+			overflow: hidden;
+		}
+
+		wa-page::part(main-content) {
+			container-type: size;
+		}
+
+		[slot='header'] {
+			align-items: center;
+			background: var(--wa-color-neutral-on-normal);
+			color: white;
+			gap: var(--wa-space-s);
+		}
+
+		[slot='header'] wa-icon {
+			color: inherit;
+		}
+
+		[slot='navigation'] {
+			box-sizing: border-box;
+			block-size: 100%;
+			overflow: auto;
+			background: var(--wa-color-surface-lowered);
+
+
+		}
+
+		wa-page::part(drawer__dialog) {
+			background: var(--wa-color-surface-lowered);
+		}
+
+		wa-avatar {
+			--size: var(--wa-font-size-xl);
+		}
+
+		wa-button.nav-action::part(base),
+		wa-button.action-project::part(base),
+		wa-button.action-scenario::part(base) {
+			justify-content: start;
+			padding-inline: var(--wa-space-m);
+			padding-block: var(--wa-space-s);
+			text-align: start;
+			transition:
+				background-color var(--wa-transition-fast),
+				color var(--wa-transition-fast);
+		}
+
+		wa-button.nav-action:hover::part(base),
+		wa-button.nav-action::part(base):hover,
+		wa-button.action-project:hover::part(base),
+		wa-button.action-project::part(base):hover,
+		wa-button.action-scenario:hover::part(base),
+		wa-button.action-scenario::part(base):hover {
+			background-color: var(--wa-color-surface-raised);
+			box-shadow: inset 0 0 0 1px var(--wa-color-surface-border);
+			color: var(--wa-color-text-normal);
+		}
+
+		wa-button.action-scenario {
+			margin-inline-start: var(--wa-space-s);
+		}
+
+		.projects {
+			inline-size: 100%;
+		}
+
+		main {
+			--video-width: 497;
+			--video-height: 1080;
+			--video-controls-height: 3.75rem;
+			--video-available-height: calc(100cqb - (var(--wa-space-l) * 2));
+			--video-fit-width: calc((var(--video-available-height) - var(--video-controls-height)) * var(--video-width) / var(--video-height));
+			align-items: stretch;
+			block-size: 100%;
+			box-sizing: border-box;
+			container-type: size;
+			display: grid;
+			gap: var(--wa-space-m) var(--wa-space-l);
+			grid-template-columns: var(--video-fit-width) minmax(0, 1fr);
+			grid-template-rows: auto minmax(0, 1fr) auto;
+			min-block-size: 0;
+			overflow: hidden;
+			padding: var(--wa-space-l);
+		}
+
+		.video {
+			--controls-background: rgba(4, 2, 2, 0.15);
+			aspect-ratio: var(--video-width) / calc(var(--video-height) + (var(--video-controls-height) * var(--video-width) / var(--video-fit-width)));
+			block-size: 100%;
+			border-radius: var(--wa-border-radius-m);
+			box-shadow: var(--ob-shadow-card);
+			display: block;
+			grid-column: 1;
+			grid-row: 1 / span 3;
+			inline-size: var(--video-fit-width);
+			max-inline-size: none;
+			overflow: hidden;
+		}
+
+		.header-bar {
+			align-self: start;
+			grid-column: 2;
+			grid-row: 1;
+		}
+
+		.scenario-description {
+			align-self: stretch;
+			grid-column: 2;
+			grid-row: 2;
+			min-block-size: 0;
+			overflow: auto;
+		}
+
+		.scenario-description wa-tree {
+			display: block;
+		}
+
+		.action-bar {
+			align-self: end;
+			display: grid;
+			grid-column: 2;
+			grid-row: 3;
+			grid-template-columns: repeat(auto-fit, minmax(min(100%, 100px), 1fr));
+			gap: var(--wa-space-s);
+			inline-size: 100%;
+		}
+
+		.action-bar wa-button {
+			inline-size: 100%;
+			max-inline-size: 250px;
+		}
+
+		.action-drawer {
+			--size: 90dvh;
+		}
+
+		.action-drawer::part(body) {
+			padding: var(--wa-space-l);
+		}
+
+		.action-drawer::part(close-button) {
+			display: none;
+		}
+
+		.action-drawer::part(footer) {
+			display: flex;
+			justify-content: end;
+			padding: var(--wa-space-m) var(--wa-space-l);
+		}
+
+		@container (max-width: 639px) {
+			main {
+				--video-fit-width: min(100%, calc(var(--video-width) * 1px));
+				--video-frame-height: calc(var(--video-height) + 60);
+				align-content: start;
+				block-size: 100%;
+				grid-template-columns: minmax(0, 1fr);
+				grid-template-rows: auto auto auto auto;
+				overflow: auto;
+			}
+
+			.video {
+				aspect-ratio: var(--video-width) / var(--video-frame-height);
+				block-size: auto;
+				grid-column: 1;
+				grid-row: 1;
+				inline-size: var(--video-fit-width);
+				justify-self: center;
+			}
+
+			.header-bar {
+				grid-column: 1;
+				grid-row: 2;
+			}
+
+			.scenario-description {
+				grid-column: 1;
+				grid-row: 3;
+				overflow: visible;
+			}
+
+				.action-bar {
+					align-self: start;
+					grid-column: 1;
+					grid-row: 4;
+					grid-template-columns: repeat(auto-fit, minmax(min(100%, 100px), 1fr));
+				}
+			}
+
+	wa-video::part(base),
+	wa-video::part(video) {
+	  block-size: 100%;
+	}
+
+		wa-video::part(video) {
+		  object-fit: contain;
+		}
+
+	</style>
+
+</head>
+
+<body>
+<wa-page mobile-breakpoint="900">
+
+	<div slot="header" class="header wa-flank">
+		<wa-icon class="font-size-xl" name="repeat" variant="solid" aria-hidden="true"></wa-icon>
+		<h1 class="font-size-xl font-weight-bold">Replay Pilot</h1>
+	</div>
+
+<nav slot="navigation" id="sidebar" class="docs-aside" aria-label="Docs navigation" data-remember-scroll="" style="scrollbar-gutter: stable;">
+
+
+<div class="projects wa-stack wa-gap-xl">
+  <section class="wa-stack">
+
+    <h2 class="font-size-m wa-cluster wa-gap-xs">
+      <wa-icon name="folder" variant="solid" aria-hidden="true"></wa-icon>
+      Projects
+    </h2>
+
+	<wa-button appearance="outlined" class="nav-action" size="s" pill><wa-icon slot="start" name="plus" variant="solid" aria-hidden="true"></wa-icon>New Project</wa-button>
+  </section>
+
+  <section class="wa-stack">
+
+    <wa-button appearance="filled" class="action-project" size="m" pill>
+      <wa-icon slot="start" name="mobile-alt" variant="solid" aria-hidden="true"></wa-icon>
+      Customer Web App
+    </wa-button>
+
+	<wa-button appearance="plain" class="action-scenario" size="s" pill><wa-icon slot="start" name="circle-plus" variant="solid" aria-hidden="true"></wa-icon>New Scenario</wa-button>
+	<wa-button appearance="filled" class="action-scenario" size="s" pill>Sign Up - Positive Flow</wa-button>
+	<wa-button appearance="plain" class="action-scenario" size="s" pill>Sign Up - Negative Flow</wa-button>
+  </section>
+
+  <section class="wa-stack">
+
+    <wa-button appearance="plain" class="action-project" size="m" pill>
+      <wa-icon slot="start" name="mobile-alt" variant="solid" aria-hidden="true"></wa-icon>
+      Ubiqular App
+    </wa-button>
+
+	<wa-button appearance="plain" class="action-scenario" size="s" pill><wa-icon slot="start" name="circle-plus" variant="solid" aria-hidden="true"></wa-icon>New Scenario</wa-button>
+	<wa-button appearance="plain" class="action-scenario" size="s" pill>Smoke Test - Positive Flow</wa-button>
+  </section>
+
+
+</div>
+</nav>
+
+<main>
+
+			<wa-video class="video" controls="full" poster="/media/poster.jpg" data-video-width="497" data-video-height="1080">
+			<source src="/media/test.mp4" type="video/mp4"/>
+			</wa-video>
+
+				<div class="header-bar">
+					<h3>Sign Up - Positive Flow </h3>
+				</div>
+
+				<div class="scenario-description">
+					<wa-tree style="--indent-guide-width: 1px;">
+					<wa-tree-item expanded>
+						Welome screen
+						<wa-tree-item expanded>Tap 'Set up Business Cash Flow'</wa-tree-item>
+					</wa-tree-item>
+
+					<wa-tree-item expanded>
+						'Set up Business Cash Flow' Drawer
+						<wa-tree-item expanded>
+							Enter 'Your Name'
+							<wa-tree-item expanded>Use 'Janet'</wa-tree-item>
+						</wa-tree-item>
+						<wa-tree-item expanded>
+							Enter 'UK Mobile Number'
+							<wa-tree-item expanded>Use '+44 7901 231230'</wa-tree-item>
+						</wa-tree-item>
+						<wa-tree-item expanded>
+							Tap 'Aggree to Terms and Conditions'
+						</wa-tree-item>
+						<wa-tree-item expanded>
+							Tap 'Continue'
+						</wa-tree-item>
+					</wa-tree-item>
+					</wa-tree>
+				</div>
+
+
+				<div class="action-bar">
+					<wa-button appearance="accent" class="action" size="s" pill data-drawer="open run-test-drawer">
+						<wa-icon slot="start" name="play" variant="solid" aria-hidden="true"></wa-icon>
+						Run
+					</wa-button>
+					<wa-button appearance="filled" class="action" size="s" pill data-drawer="open previous-video-drawer">
+						<wa-icon slot="start" name="rectangle-vertical-history" variant="solid" aria-hidden="true" style="transform: scaleX(-1);"></wa-icon>
+						Previous
+					</wa-button>
+					<wa-button appearance="filled" class="action" size="s" pill data-drawer="open edit-drawer">
+						<wa-icon slot="start" name="pen-to-square" variant="solid" aria-hidden="true"></wa-icon>
+						Edit
+					</wa-button>
+				</div>
+
+		</main>
+
+		<wa-drawer
+			id="edit-drawer"
+			class="action-drawer"
+			label="Edit"
+			placement="bottom"
+			light-dismiss
+			with-footer
+		>
+			<div class="wa-stack wa-gap-m">
+				<p>Update the scenario name, steps, and expected outcomes.</p>
+			</div>
+			<wa-button slot="footer" appearance="filled" data-drawer="close">Close</wa-button>
+		</wa-drawer>
+
+		<wa-drawer
+			id="run-test-drawer"
+			class="action-drawer"
+			label="Run Test"
+			placement="bottom"
+			light-dismiss
+			with-footer
+		>
+			<div class="wa-stack wa-gap-m">
+				<p>Review the run settings before starting this scenario.</p>
+			</div>
+			<wa-button slot="footer" appearance="filled" data-drawer="close">Close</wa-button>
+		</wa-drawer>
+
+		<wa-drawer
+			id="previous-video-drawer"
+			class="action-drawer"
+			label="Previous video"
+			placement="bottom"
+			light-dismiss
+			with-footer
+		>
+			<div class="wa-stack wa-gap-m">
+				<p>Browse earlier recordings for this scenario.</p>
+			</div>
+			<wa-button slot="footer" appearance="filled" data-drawer="close">Close</wa-button>
+		</wa-drawer>
+</wa-page>
+
+	<script type="module">
+		customElements.whenDefined('wa-video').then(() => {
+			const sheet = new CSSStyleSheet();
+
+			sheet.replaceSync(`
+				.video-container,
+				.video-content {
+					block-size: 100%;
+					min-block-size: 0;
+				}
+
+				.video-wrapper {
+					aspect-ratio: auto;
+					block-size: 100%;
+					flex: 1 1 auto;
+					min-block-size: 0;
+				}
+
+				.video-wrapper video {
+					block-size: 100%;
+					object-fit: contain;
+				}
+
+				.poster-overlay {
+					background-color: black;
+					background-position: center;
+					background-repeat: no-repeat;
+					background-size: contain;
+				}
+			`);
+
+			document.querySelectorAll('wa-video').forEach(video => {
+				video.shadowRoot.adoptedStyleSheets = [
+					...video.shadowRoot.adoptedStyleSheets,
+					sheet
+				];
+			});
+		});
+	</script>
+
+	</body>
+</html>
