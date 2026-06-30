@@ -22,6 +22,14 @@ export function getLivePreviewUrl() {
   return `${getApiUrl()}/runs/live`;
 }
 
+export function getLivePreviewEventsUrl() {
+  return `${getApiUrl()}/runs/live/events`;
+}
+
+export function getEmitInteractionsUrl() {
+  return `${getApiUrl()}/emit-interactions.js`;
+}
+
 async function request(path, options = {}) {
   const response = await fetch(`${getApiUrl()}${path}`, {
     headers: {
@@ -85,6 +93,13 @@ export function saveScenario(projectId, scenario) {
   return request("/scenarios", {
     method: "POST",
     body: JSON.stringify({ projectId, scenario })
+  });
+}
+
+export function removeScenario(projectId, scenarioId) {
+  return request("/scenarios/remove", {
+    method: "POST",
+    body: JSON.stringify({ projectId, scenarioId })
   });
 }
 

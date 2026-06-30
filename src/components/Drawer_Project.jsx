@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { handleDrawerFormKeyDown } from "./Utitlity_Keyboard.js";
-import { defaultCapture } from "../lib/projectDefaults.js";
+import { defaultCapture, getOutputQuality, outputQualityOptions } from "../lib/projectDefaults.js";
 
 const defaultProject = {
   name: "",
@@ -43,6 +43,36 @@ function ResolutionDropdown({ value, onChange }) {
   );
 }
 
+function OutputQualityDropdown({ value, onChange }) {
+  const dropdownRef = useRef(null);
+  const selectedOption = getOutputQuality(value);
+
+  useEffect(() => {
+    const dropdown = dropdownRef.current;
+    if (!dropdown) return;
+
+    const handleSelect = (event) => {
+      const nextValue = event.detail.item.value;
+      if (nextValue) onChange(nextValue);
+    };
+
+    dropdown.addEventListener("wa-select", handleSelect);
+    return () => dropdown.removeEventListener("wa-select", handleSelect);
+  }, [onChange]);
+
+  return (
+    <div className="field-stack">
+      <span className="field-label">Output quality</span>
+      <wa-dropdown ref={dropdownRef}>
+        <wa-button slot="trigger" appearance="outlined" size="m" with-caret>{selectedOption.label}</wa-button>
+        {outputQualityOptions.map((option) => (
+          <wa-dropdown-item key={option.value} value={option.value}>{option.label}</wa-dropdown-item>
+        ))}
+      </wa-dropdown>
+    </div>
+  );
+}
+
 export default function Drawer_Project({ project, onCancel, onRemove, onSave }) {
   const formId = useId();
   const removeDialogRef = useRef(null);
@@ -53,6 +83,7 @@ export default function Drawer_Project({ project, onCancel, onRemove, onSave }) 
   const heightRef = useRef(null);
   const [iconPreview, setIconPreview] = useState(project?.icon || defaultProject.icon);
   const [resolution, setResolution] = useState(project?.capture?.resolution || defaultProject.capture.resolution);
+  const [outputQuality, setOutputQuality] = useState(getOutputQuality(project?.capture?.outputQuality).value);
 
   useEffect(() => {
     const next = project || defaultProject;
@@ -63,6 +94,7 @@ export default function Drawer_Project({ project, onCancel, onRemove, onSave }) 
     if (heightRef.current) heightRef.current.value = next.capture?.height || defaultProject.capture.height;
     setIconPreview(next.icon || defaultProject.icon);
     setResolution(next.capture?.resolution || defaultProject.capture.resolution);
+    setOutputQuality(getOutputQuality(next.capture?.outputQuality).value);
   }, [project]);
 
   useEffect(() => {
@@ -125,7 +157,8 @@ export default function Drawer_Project({ project, onCancel, onRemove, onSave }) 
       capture: {
         width: Number(getControlValue(widthRef.current) || defaultProject.capture.width),
         height: Number(getControlValue(heightRef.current) || defaultProject.capture.height),
-        resolution
+        resolution,
+        outputQuality
       }
     });
   }
@@ -165,6 +198,7 @@ export default function Drawer_Project({ project, onCancel, onRemove, onSave }) 
           <wa-input ref={heightRef} label="Capture height" type="number" inputmode="numeric" placeholder="px"></wa-input>
           <ResolutionDropdown value={resolution} onChange={setResolution} />
         </div>
+        <OutputQualityDropdown value={outputQuality} onChange={setOutputQuality} />
       </form>
       <div slot="footer" className="drawer-actions" onKeyDown={handleKeyDown}>
         <wa-button size="m" variant="neutral" pill appearance="filled" type="button" onClick={onCancel}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultCapture } from "../lib/projectDefaults.js";
 import { getRecordingUrl, getRuns } from "../lib/projectsClient.js";
+import { setVideoSubtitles } from "../lib/videoSubtitles.js";
 
 function formatRunTime(value) {
   if (!value) return "Recorded";
@@ -30,12 +31,13 @@ function uniqueSources(run) {
     }));
 }
 
-function PreviousVideoSlide({ project, run }) {
+function PreviousVideoSlide({ project, run, subtitlesEnabled }) {
   const videoRef = useRef(null);
   const width = Number(run.viewport?.width || project?.capture?.width || defaultCapture.width);
   const height = Number(run.viewport?.height || project?.capture?.height || defaultCapture.height);
   const sources = uniqueSources(run);
   const poster = getRecordingUrl(run.screenshotUrl);
+  const subtitleUrl = getRecordingUrl(run.subtitleUrl);
   const frameStyle = {
     "--previous-video-width": width,
     "--previous-video-height": height
@@ -43,32 +45,60 @@ function PreviousVideoSlide({ project, run }) {
 
   useEffect(() => {
     let cancelled = false;
+    let nativeVideo;
+    let nativeTracks = [];
 
-    async function resetVideoAspectRatio() {
+    const applySubtitles = () => setVideoSubtitles(nativeVideo, subtitlesEnabled);
+
+    async function configureVideo() {
       await customElements.whenDefined("wa-video");
       await videoRef.current?.updateComplete;
       if (cancelled) return;
 
       const wrapper = videoRef.current?.shadowRoot?.querySelector(".video-wrapper");
       if (wrapper) wrapper.style.aspectRatio = "auto";
+
+      nativeVideo = videoRef.current?.shadowRoot?.querySelector("video");
+      nativeVideo?.addEventListener("loadedmetadata", applySubtitles);
+      nativeVideo?.addEventListener("loadeddata", applySubtitles);
+      nativeTracks = Array.from(nativeVideo?.querySelectorAll("track") || []);
+      nativeTracks.forEach((track) => track.addEventListener("load", applySubtitles));
+
+      if (nativeVideo && nativeVideo.crossOrigin !== "anonymous") {
+        nativeVideo.crossOrigin = "anonymous";
+        nativeVideo.load();
+      }
+      applySubtitles();
     }
 
-    resetVideoAspectRatio();
+    configureVideo();
 
     return () => {
       cancelled = true;
+      nativeVideo?.removeEventListener("loadedmetadata", applySubtitles);
+      nativeVideo?.removeEventListener("loadeddata", applySubtitles);
+      nativeTracks.forEach((track) => track.removeEventListener("load", applySubtitles));
     };
-  }, []);
+  }, [subtitlesEnabled]);
 
   return (
     <wa-carousel-item class="previous-video-item" style={frameStyle}>
       <div className="previous-video-slide">
         <div className="previous-video-frame">
           {sources.length ? (
-            <wa-video ref={videoRef} class="previous-video" controls="full" poster={poster}>
+            <wa-video ref={videoRef} class="previous-video" controls="standard" poster={poster}>
               {sources.map((source) => (
                 <source src={source.url} type={source.type} key={source.url} />
               ))}
+              {subtitleUrl ? (
+                <track
+                  kind="subtitles"
+                  src={subtitleUrl}
+                  srcLang="en"
+                  label="Replay Pilot captions"
+                  default={subtitlesEnabled}
+                />
+              ) : null}
             </wa-video>
           ) : (
             <div className="previous-video-empty">Recording unavailable</div>
@@ -85,7 +115,13 @@ function PreviousVideoSlide({ project, run }) {
   );
 }
 
-export default function Drawer_Recordings({ project, scenario, onCancel }) {
+export default function Drawer_Recordings({
+  project,
+  scenario,
+  onCancel,
+  onSubtitlesChange,
+  subtitlesEnabled = true
+}) {
   const [state, setState] = useState({ status: "loading", runs: [], message: "" });
   const title = useMemo(
     () => scenario?.name || project?.name || "recordings",
@@ -146,7 +182,12 @@ export default function Drawer_Recordings({ project, scenario, onCancel }) {
         {state.status === "ready" ? (
           <wa-carousel class="previous-videos-carousel" navigation pagination mouse-dragging style={carouselStyle}>
             {state.runs.map((run) => (
-              <PreviousVideoSlide project={project} run={run} key={run.id} />
+              <PreviousVideoSlide
+                project={project}
+                run={run}
+                subtitlesEnabled={subtitlesEnabled}
+                key={run.id}
+              />
             ))}
           </wa-carousel>
         ) : null}
@@ -162,8 +203,24 @@ export default function Drawer_Recordings({ project, scenario, onCancel }) {
           </div>
         ) : null}
       </div>
-      <div slot="footer" className="drawer-actions">
-        <wa-button size="m" variant="neutral" pill appearance="filled" onClick={onCancel}>
+      <div slot="footer" className="drawer-actions recordings-actions">
+        <wa-button
+          size="m"
+          variant="neutral"
+          pill
+          appearance={subtitlesEnabled ? "filled" : "accent"}
+          aria-pressed={subtitlesEnabled ? "true" : "false"}
+          onClick={() => onSubtitlesChange?.(!subtitlesEnabled)}
+        >
+          <wa-icon
+            slot="start"
+            name={subtitlesEnabled ? "subtitles" : "subtitles-slash"}
+            variant="solid"
+            aria-hidden="true"
+          ></wa-icon>
+          {subtitlesEnabled ? "Subtitles" : "Subtitles off"}
+        </wa-button>
+        <wa-button size="m" variant="neutral" pill appearance="accent" onClick={onCancel}>
           <wa-icon slot="start" name="circle-xmark" variant="solid" aria-hidden="true"></wa-icon>
           Close
         </wa-button>

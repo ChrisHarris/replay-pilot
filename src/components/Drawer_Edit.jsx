@@ -1,50 +1,53 @@
 import { useEffect, useId, useRef } from "react";
 import { handleDrawerFormKeyDown } from "./Utitlity_Keyboard.js";
 import { normaliseInstructionIndentation } from "../lib/instructionFormatting.js";
+import { instructionsToPlaywrightScript } from "../lib/instructionScript.js";
 
 export const SCENARIO_SAVE_ICON = "down-from-dotted-line";
-
-export const defaultScenarioInstructions = `# Open App
-- Open App:
-\t- Append to url: /?qr=demo-ticket#demo
-\t- Wait 2 seconds
-\t
-# Example Instructions (All text below is ignored)
-- Open App
-\t- Append to url: /?qr=demo-ticket#demo
-\t- Tap Sign Up button
-- Sign Up Form
-\t- Tap 'Your name' field
-\t\t- Enter 'Janet Denbeigh'
-\t- Tap 'Your UK Mobile number'
-\t\t- Enter 'abc'
-\t- Tap 'Your UK Mobile number' Clear button
-\t\t- Enter '01234 56789'
-\t\t- Unfocus field
-\t- Tap Continue button`;
 
 function getControlValue(control) {
   return control?.value || control?.shadowRoot?.querySelector("input, textarea")?.value || "";
 }
 
-export default function Drawer_Edit({ scenario, onCancel, onSave }) {
+export default function Drawer_Edit({ scenario, onCancel, onRemove, onSave }) {
   const formId = useId();
+  const removeDialogRef = useRef(null);
   const nameRef = useRef(null);
   const instructionsRef = useRef(null);
   const scriptRef = useRef(null);
 
   useEffect(() => {
     if (nameRef.current) nameRef.current.value = scenario?.name || "";
-    if (instructionsRef.current) instructionsRef.current.value = scenario?.instructions || defaultScenarioInstructions;
+    if (instructionsRef.current) instructionsRef.current.value = scenario?.instructions || "";
     if (scriptRef.current) scriptRef.current.value = scenario?.script || "";
   }, [scenario]);
 
+  useEffect(() => {
+    const instructions = instructionsRef.current;
+    if (!instructions) return;
+
+    const handleInstructionsBlur = () => regenerateScript();
+
+    instructions.addEventListener("blur", handleInstructionsBlur);
+    return () => instructions.removeEventListener("blur", handleInstructionsBlur);
+  }, []);
+
+  function regenerateScript() {
+    const instructions = normaliseInstructionIndentation(
+      getControlValue(instructionsRef.current)
+    );
+    const script = instructionsToPlaywrightScript(instructions);
+    if (scriptRef.current) scriptRef.current.value = script;
+    return { instructions, script };
+  }
+
   function handleSave() {
+    const generated = regenerateScript();
     onSave({
       ...scenario,
       name: getControlValue(nameRef.current).trim() || "Smoke Test",
-      instructions: normaliseInstructionIndentation(getControlValue(instructionsRef.current) || defaultScenarioInstructions),
-      script: getControlValue(scriptRef.current)
+      instructions: generated.instructions,
+      script: generated.script
     });
   }
 
@@ -55,6 +58,16 @@ export default function Drawer_Edit({ scenario, onCancel, onSave }) {
 
   function handleKeyDown(event) {
     handleDrawerFormKeyDown(event, { onCancel, onSubmit: handleSave });
+  }
+
+  async function handleRemoveRequest() {
+    await customElements.whenDefined("wa-dialog");
+    if (removeDialogRef.current) removeDialogRef.current.open = true;
+  }
+
+  function handleRemoveConfirm() {
+    if (removeDialogRef.current) removeDialogRef.current.open = false;
+    onRemove?.(scenario);
   }
 
   return (
@@ -79,6 +92,7 @@ export default function Drawer_Edit({ scenario, onCancel, onSave }) {
               className="playwright-script"
               label="Playwright script"
               hint="This script is generated from the Text instructions"
+              disabled
             ></wa-textarea>
           </wa-tab-panel>
 
@@ -89,11 +103,29 @@ export default function Drawer_Edit({ scenario, onCancel, onSave }) {
           <wa-icon slot="start" name="circle-xmark" variant="solid" aria-hidden="true"></wa-icon>
           Cancel
         </wa-button>
+        {scenario?.id ? (
+          <wa-button size="m" variant="danger" pill appearance="filled" type="button" onClick={handleRemoveRequest}>
+            <wa-icon slot="start" name="trash" variant="solid" aria-hidden="true"></wa-icon>
+            Remove
+          </wa-button>
+        ) : null}
         <wa-button size="m" variant="neutral" pill appearance="accent" type="submit" form={formId}>
           <wa-icon slot="start" name={SCENARIO_SAVE_ICON} variant="solid" aria-hidden="true"></wa-icon>
           Save
         </wa-button>
       </div>
+      {scenario?.id ? (
+        <wa-dialog ref={removeDialogRef} label="Are you sure?" with-footer>
+          <p>This will remove {scenario.name} from the project and archive its markdown.</p>
+          <wa-button slot="footer" variant="neutral" appearance="filled" data-dialog="close">
+            Cancel
+          </wa-button>
+          <wa-button slot="footer" variant="danger" appearance="filled" onClick={handleRemoveConfirm}>
+            <wa-icon slot="start" name="trash" variant="solid" aria-hidden="true"></wa-icon>
+            Remove
+          </wa-button>
+        </wa-dialog>
+      ) : null}
     </>
   );
 }

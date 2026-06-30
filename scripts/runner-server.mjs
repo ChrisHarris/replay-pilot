@@ -6,13 +6,32 @@ import { spawn } from "node:child_process";
 import ffmpegStaticPath from "ffmpeg-static";
 import { chromium } from "playwright";
 import { expect } from "@playwright/test";
-import { defaultCapture } from "../src/lib/projectDefaults.js";
+import { defaultCapture, getOutputQuality } from "../src/lib/projectDefaults.js";
 import { normaliseInstructionIndentation } from "../src/lib/instructionFormatting.js";
-import { parseProjectsFile, serializeProjects, slugify, visibleProjects } from "../src/lib/projectsMarkdown.js";
+import { instructionsToPlaywrightScript } from "../src/lib/instructionScript.js";
+import {
+  parseProjectsFile,
+  REMOVED_FOLDER_SUFFIX,
+  removedScenarioFolderName,
+  serializeProjects,
+  serializeScenario,
+  slugify,
+  visibleProjects
+} from "../src/lib/projectsMarkdown.js";
+import { muxSubtitleTrack } from "./subtitle-mux.mjs";
+import {
+  captionTextFromConsoleArgs,
+  createCaptionTimeline,
+  serializeSrt,
+  serializeVtt,
+  syncActionCaption
+} from "./subtitle-utils.mjs";
+import { createScreencastOptions, frameMimeTypeFor, h264Crf, inputCodecFor } from "./video-output.mjs";
 
 const rootDir = resolve(new URL("..", import.meta.url).pathname);
 const projectsDir = join(rootDir, "Projects");
 const projectsPath = join(projectsDir, "projects.md");
+const emitInteractionsPath = join(rootDir, "public", "emit-interactions.js");
 const apiPort = Number(process.env.REPLAY_PILOT_API_PORT || 4578);
 const uiPort = Number(process.env.REPLAY_PILOT_UI_PORT || 4577);
 const host = "127.0.0.1";
@@ -22,8 +41,9 @@ const captureFps = 30;
 let currentRun = null;
 let currentRunControl = null;
 let livePreviewFrame = "";
+let livePreviewAction = null;
 const livePreviewClients = new Set();
-const removedSuffix = " **Removed**";
+const removedSuffix = REMOVED_FOLDER_SUFFIX;
 const removedFolderSuffixes = [removedSuffix, " **removed**"];
 
 const livePreviewHtml = `<!doctype html>
@@ -48,7 +68,7 @@ const livePreviewHtml = `<!doctype html>
       const events = new EventSource('/runs/live/events');
 
       events.addEventListener('frame', (event) => {
-        preview.src = 'data:image/jpeg;base64,' + event.data;
+        preview.src = event.data;
         preview.style.display = 'block';
         status.hidden = true;
       });
@@ -92,6 +112,7 @@ function broadcastLivePreviewEvent(eventName, data = "") {
 
 function beginLivePreview() {
   livePreviewFrame = "";
+  livePreviewAction = null;
   broadcastLivePreviewEvent("waiting");
 }
 
@@ -99,16 +120,19 @@ function finishLivePreview() {
   broadcastLivePreviewEvent("finished");
 }
 
-function createMp4FrameRecorder(outputPath) {
+function createMp4FrameRecorder(outputPath, outputQuality) {
+  const inputCodec = inputCodecFor(outputQuality);
+  const frameMimeType = frameMimeTypeFor(outputQuality);
   const ffmpeg = spawn(getFfmpegPath(), [
     "-y",
     "-loglevel", "error",
     "-f", "image2pipe",
     "-framerate", String(captureFps),
-    "-vcodec", "mjpeg",
+    "-vcodec", inputCodec,
     "-i", "pipe:0",
     "-an",
     "-c:v", "libx264",
+    "-crf", String(h264Crf),
     "-preset", "veryfast",
     "-tune", "zerolatency",
     "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:black",
@@ -155,12 +179,15 @@ function createMp4FrameRecorder(outputPath) {
   return {
     updateFrame(data) {
       if (aborted) return;
-      latestFrameData = data;
+      latestFrameData = `data:${frameMimeType};base64,${data}`;
       latestFrame = Buffer.from(data, "base64");
       if (timer) return;
 
       writeFrame();
       timer = setInterval(writeFrame, 1000 / captureFps);
+    },
+    getCurrentTime() {
+      return frameCount > 0 ? (frameCount - 1) / captureFps : 0;
     },
     async stop() {
       if (timer) clearInterval(timer);
@@ -194,7 +221,7 @@ function createMp4FrameRecorder(outputPath) {
   };
 }
 
-async function startPlaywrightScreencast(page, viewport, onFrame) {
+async function startPlaywrightScreencast(page, viewport, outputQuality, onFrame) {
   const session = await page.context().newCDPSession(page);
 
   session.on("Page.screencastFrame", ({ data, sessionId }) => {
@@ -202,13 +229,7 @@ async function startPlaywrightScreencast(page, viewport, onFrame) {
     onFrame(data);
   });
 
-  await session.send("Page.startScreencast", {
-    format: "jpeg",
-    quality: 75,
-    maxWidth: viewport.width,
-    maxHeight: viewport.height,
-    everyNthFrame: 1
-  });
+  await session.send("Page.startScreencast", createScreencastOptions(viewport, outputQuality));
 
   return async () => {
     await session.send("Page.stopScreencast").catch(() => {});
@@ -255,7 +276,7 @@ async function readProjectState() {
     if (error.code === "ENOENT") {
       await mkdir(projectsDir, { recursive: true });
       await writeFile(projectsPath, "# Replay Pilot Projects\n");
-      return { projects: [], preferences: { projectId: "", scenarioId: "" } };
+      return { projects: [], preferences: { projectId: "", scenarioId: "", subtitles: true } };
     }
     throw error;
   }
@@ -271,14 +292,19 @@ function getPreferredSelection(projects, preferences = {}) {
   const preferredProject = selectableProjects.find((project) => project.id === preferences.projectId);
   const preferredScenario = preferredProject?.scenarios?.find((scenario) => scenario.id === preferences.scenarioId);
   if (preferredProject && preferredScenario) {
-    return { projectId: preferredProject.id, scenarioId: preferredScenario.id };
+    return {
+      projectId: preferredProject.id,
+      scenarioId: preferredScenario.id,
+      subtitles: preferences.subtitles !== false
+    };
   }
 
-  const firstProject = selectableProjects[0];
+  const firstProject = selectableProjects.find((project) => project.scenarios?.length);
   const firstScenario = firstProject?.scenarios?.[0];
   return {
     projectId: firstProject?.id || "",
-    scenarioId: firstScenario?.id || ""
+    scenarioId: firstScenario?.id || "",
+    subtitles: preferences.subtitles !== false
   };
 }
 
@@ -346,6 +372,32 @@ function activeProjectFolderPath(project) {
   return projectFolderPath({ ...project, removed: false }, false);
 }
 
+function activeScenarioFolderPath(project, scenario) {
+  return join(activeProjectFolderPath(project), slugify(scenario?.id || scenario?.name || "scenario"));
+}
+
+async function nextRemovedScenarioFolder(project, scenario) {
+  let copyIndex = 1;
+  while (true) {
+    const name = removedScenarioFolderName(scenario, copyIndex);
+    const path = join(activeProjectFolderPath(project), name);
+    if (!await pathExists(path)) return { name, path };
+    copyIndex += 1;
+  }
+}
+
+async function archiveScenario(project, scenario) {
+  const activePath = activeScenarioFolderPath(project, scenario);
+  const archive = await nextRemovedScenarioFolder(project, scenario);
+  await mkdir(activeProjectFolderPath(project), { recursive: true });
+
+  if (await pathExists(activePath)) await rename(activePath, archive.path);
+  else await mkdir(archive.path, { recursive: true });
+
+  await writeFile(join(archive.path, "scenario.md"), serializeScenario(scenario));
+  return archive.name;
+}
+
 async function ensureSavedProjectFolder(existing, nextProject) {
   if (existing) {
     await renameProjectFolder(existing, nextProject);
@@ -381,7 +433,10 @@ async function saveProject(projectInput) {
     capture: {
       width: Number((restoringByName ? existing.capture?.width : projectInput.capture?.width) || defaultCapture.width),
       height: Number((restoringByName ? existing.capture?.height : projectInput.capture?.height) || defaultCapture.height),
-      resolution: Number((restoringByName ? existing.capture?.resolution : projectInput.capture?.resolution) || defaultCapture.resolution)
+      resolution: Number((restoringByName ? existing.capture?.resolution : projectInput.capture?.resolution) || defaultCapture.resolution),
+      outputQuality: getOutputQuality(
+        restoringByName ? existing.capture?.outputQuality : projectInput.capture?.outputQuality
+      ).value
     },
     scenarios: existing?.scenarios?.length ? existing.scenarios : [defaultSmokeScenario()]
   };
@@ -391,9 +446,9 @@ async function saveProject(projectInput) {
     : [...projects, nextProject];
 
   const selectedScenario = nextProject.scenarios?.[0];
-  const preferences = selectedScenario
-    ? { projectId: nextProject.id, scenarioId: selectedScenario.id }
-    : getPreferredSelection(nextProjects, state.preferences);
+  const preferences = getPreferredSelection(nextProjects, selectedScenario
+    ? { ...state.preferences, projectId: nextProject.id, scenarioId: selectedScenario.id }
+    : state.preferences);
 
   await ensureSavedProjectFolder(existing, nextProject);
   await writeProjectState(nextProjects, preferences);
@@ -438,28 +493,33 @@ async function saveScenario(projectId, scenarioInput) {
     ? project.scenarios.map((item) => item.id === scenarioId ? scenario : item)
     : [...project.scenarios, scenario];
 
-  const preferences = { projectId: project.id, scenarioId };
+  const preferences = getPreferredSelection(projects, {
+    ...state.preferences,
+    projectId: project.id,
+    scenarioId
+  });
   await writeProjectState(projects, preferences);
   return { project, scenario, projects: visibleProjects(projects), preferences };
 }
 
-function scriptFromInstructions(instructions = "") {
-  const lines = instructions.split("\n");
-  const commands = [`await page.goto(project.url, { waitUntil: "networkidle" });`];
+async function removeScenario(projectId, scenarioId) {
+  const state = await readProjectState();
+  const projects = state.projects;
+  const project = projects.find((item) => item.id === projectId && !item.removed);
+  if (!project) throw new Error("Project not found.");
 
-  for (const line of lines) {
-    const text = line.replace(/^\s*[-*]\s*/, "").trim();
-    const waitMatch = text.match(/^Wait\s+([\d.]+)\s*(seconds?|s|milliseconds?|ms)?$/i);
-    if (waitMatch) {
-      const amount = Number(waitMatch[1]);
-      const unit = waitMatch[2]?.toLowerCase() || "seconds";
-      const ms = unit.startsWith("ms") || unit.startsWith("millisecond") ? amount : amount * 1000;
-      commands.push(`await page.waitForTimeout(${Math.round(ms)});`);
-    }
-  }
+  const scenarioIndex = project.scenarios.findIndex((item) => item.id === scenarioId);
+  if (scenarioIndex < 0) throw new Error("Scenario not found.");
 
-  if (commands.length === 1) commands.push("await page.waitForTimeout(1000);");
-  return commands.join("\n");
+  const [scenario] = project.scenarios.splice(scenarioIndex, 1);
+  const archiveFolder = await archiveScenario(project, scenario);
+  const nextScenario = project.scenarios[Math.min(scenarioIndex, project.scenarios.length - 1)];
+  const preferences = getPreferredSelection(projects, nextScenario
+    ? { ...state.preferences, projectId: project.id, scenarioId: nextScenario.id }
+    : { ...state.preferences, projectId: "", scenarioId: "" });
+
+  await writeProjectState(projects, preferences);
+  return { project, scenario, archiveFolder, projects: visibleProjects(projects), preferences };
 }
 
 async function ensureScenarioScript(projectId, scenarioId) {
@@ -471,8 +531,9 @@ async function ensureScenarioScript(projectId, scenarioId) {
   const scenario = project.scenarios.find((item) => item.id === scenarioId);
   if (!scenario) throw new Error("Scenario not found.");
 
-  if (!scenario.script?.trim()) {
-    scenario.script = scriptFromInstructions(scenario.instructions);
+  const generatedScript = instructionsToPlaywrightScript(scenario.instructions);
+  if (scenario.script !== generatedScript) {
+    scenario.script = generatedScript;
     await writeProjectState(projects, state.preferences);
   }
 
@@ -482,8 +543,8 @@ async function ensureScenarioScript(projectId, scenarioId) {
 async function savePreferences(preferencesInput) {
   const state = await readProjectState();
   const preferences = getPreferredSelection(state.projects, {
-    projectId: preferencesInput?.projectId,
-    scenarioId: preferencesInput?.scenarioId
+    ...state.preferences,
+    ...preferencesInput
   });
   await writeProjectState(state.projects, preferences);
   return { projects: visibleProjects(state.projects), preferences };
@@ -516,6 +577,7 @@ async function listRuns(projectId, scenarioId) {
         status: run.status || "finished",
         videoUrl: run.videoUrl,
         mp4Url: run.mp4Url,
+        subtitleUrl: run.subtitleUrl,
         screenshotUrl: run.screenshotUrl,
         viewport: run.viewport || project.capture || defaultCapture,
         deviceScaleFactor: run.deviceScaleFactor,
@@ -532,7 +594,24 @@ async function listRuns(projectId, scenarioId) {
 
 function createScriptRunner(script) {
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  return new AsyncFunction("page", "project", "scenario", "expect", "helpers", script);
+  return new AsyncFunction("page", "project", "scenario", "expect", "helpers", "console", script);
+}
+
+function createScenarioConsole(onCaption) {
+  return {
+    debug: console.debug.bind(console),
+    error: console.error.bind(console),
+    info: console.info.bind(console),
+    log(...args) {
+      const caption = captionTextFromConsoleArgs(args);
+      if (caption !== null) {
+        onCaption(caption);
+        return;
+      }
+      console.log(...args);
+    },
+    warn: console.warn.bind(console)
+  };
 }
 
 function sanitizeFilename(value) {
@@ -562,15 +641,22 @@ async function runScenario(projectId, scenarioId) {
       height: Number(project.capture?.height || defaultCapture.height)
     };
     const deviceScaleFactor = Number(project.capture?.resolution || defaultCapture.resolution);
+    const outputQuality = getOutputQuality(project.capture?.outputQuality);
     const mp4Filename = `${sanitizeFilename(scenario.name)}.mp4`;
     const finalMp4Path = join(runDir, mp4Filename);
     const pendingMp4Path = join(runDir, `${sanitizeFilename(scenario.name)}.pending.mp4`);
+    const captionedMp4Path = join(runDir, `${sanitizeFilename(scenario.name)}.captioned.pending.mp4`);
+    const subtitlePath = join(runDir, `${sanitizeFilename(scenario.name)}.captions.srt`);
+    const subtitleVttFilename = `${sanitizeFilename(scenario.name)}.captions.vtt`;
+    const subtitleVttPath = join(runDir, subtitleVttFilename);
     const browser = await chromium.launch({ headless: true });
     beginLivePreview();
     control.browser = browser;
-    const recorder = createMp4FrameRecorder(pendingMp4Path);
+    const recorder = createMp4FrameRecorder(pendingMp4Path, outputQuality);
+    const captionTimeline = createCaptionTimeline(() => recorder.getCurrentTime());
     control.recorder = recorder;
     let recordingSaved = false;
+    let subtitleSaved = false;
     let screenshotPath = "";
     let runError = null;
 
@@ -581,17 +667,24 @@ async function runScenario(projectId, scenarioId) {
       const page = await context.newPage();
       let stopScreencast = async () => {};
       try {
-        stopScreencast = await startPlaywrightScreencast(page, viewport, recorder.updateFrame);
+        stopScreencast = await startPlaywrightScreencast(page, viewport, outputQuality, recorder.updateFrame);
       } catch (error) {
         runError = error;
       }
       const helpers = {
+        caption: (text) => captionTimeline.add(text),
+        async step(index, text) {
+          livePreviewAction = syncActionCaption(captionTimeline, index, text);
+          broadcastLivePreviewEvent("action", JSON.stringify(livePreviewAction));
+          await new Promise((resolveStep) => setImmediate(resolveStep));
+        },
         wait: (ms) => page.waitForTimeout(ms),
         seconds: (seconds) => page.waitForTimeout(seconds * 1000)
       };
+      const scenarioConsole = createScenarioConsole((text) => captionTimeline.add(text));
       try {
         if (control.cancelRequested) throw new Error("Recording cancelled.");
-        await createScriptRunner(scenario.script)(page, project, scenario, expect, helpers);
+        await createScriptRunner(scenario.script)(page, project, scenario, expect, helpers, scenarioConsole);
       } catch (error) {
         runError = error;
       } finally {
@@ -602,12 +695,30 @@ async function runScenario(projectId, scenarioId) {
         await stopScreencast();
         if (!control.cancelRequested) {
           try {
-            await recorder.stop();
-            await rename(pendingMp4Path, finalMp4Path);
+            const { frameCount } = await recorder.stop();
+            const captions = captionTimeline.finish(frameCount / captureFps);
+            if (captions.length) {
+              await writeFile(subtitlePath, serializeSrt(captions));
+              await muxSubtitleTrack(pendingMp4Path, subtitlePath, captionedMp4Path);
+              await rm(pendingMp4Path, { force: true });
+              await rename(captionedMp4Path, finalMp4Path);
+              try {
+                await writeFile(subtitleVttPath, serializeVtt(captions));
+                subtitleSaved = true;
+              } catch (error) {
+                console.warn(`Could not save WebVTT captions: ${error.message}`);
+              }
+            } else {
+              await rename(pendingMp4Path, finalMp4Path);
+            }
             recordingSaved = true;
           } catch (error) {
             await rm(pendingMp4Path, { force: true }).catch(() => {});
+            await rm(captionedMp4Path, { force: true }).catch(() => {});
+            await rm(subtitleVttPath, { force: true }).catch(() => {});
             runError = error;
+          } finally {
+            await rm(subtitlePath, { force: true }).catch(() => {});
           }
         }
         await context.close().catch(() => {});
@@ -639,6 +750,9 @@ async function runScenario(projectId, scenarioId) {
 
     const relativeMp4Path = `${project.id}/${runId}/${mp4Filename}`;
     const recordingUrl = recordingSaved ? `/recordings/${relativeMp4Path}` : undefined;
+    const subtitleUrl = recordingSaved && subtitleSaved
+      ? `/recordings/${project.id}/${runId}/${subtitleVttFilename}`
+      : undefined;
     const run = {
       id: runId,
       projectId: project.id,
@@ -646,9 +760,11 @@ async function runScenario(projectId, scenarioId) {
       status: runError ? "failed" : "passed",
       videoUrl: recordingUrl,
       mp4Url: recordingUrl,
+      subtitleUrl,
       screenshotUrl: screenshotPath ? `/recordings/${project.id}/${runId}/${sanitizeFilename(scenario.name)}.png` : undefined,
       viewport,
       deviceScaleFactor,
+      outputQuality: outputQuality.value,
       error: runError?.message,
       finishedAt: new Date().toISOString()
     };
@@ -714,6 +830,8 @@ async function serveRecording(res, url) {
       ? "video/mp4"
       : filePath.endsWith(".png")
         ? "image/png"
+        : filePath.endsWith(".vtt")
+          ? "text/vtt; charset=utf-8"
         : filePath.endsWith(".json")
           ? "application/json"
           : "application/octet-stream";
@@ -745,6 +863,16 @@ function serveLivePreview(res) {
   res.end(livePreviewHtml);
 }
 
+async function serveEmitInteractions(res) {
+  const source = await readFile(emitInteractionsPath, "utf8");
+  res.writeHead(200, {
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-store",
+    "Content-Type": "text/javascript; charset=utf-8"
+  });
+  res.end(source);
+}
+
 function streamLivePreview(req, res) {
   res.writeHead(200, {
     "Access-Control-Allow-Origin": "*",
@@ -757,6 +885,7 @@ function streamLivePreview(req, res) {
 
   if (livePreviewFrame) writeLivePreviewEvent(res, "frame", livePreviewFrame);
   else writeLivePreviewEvent(res, "waiting");
+  if (livePreviewAction) writeLivePreviewEvent(res, "action", JSON.stringify(livePreviewAction));
 
   req.on("close", () => {
     livePreviewClients.delete(res);
@@ -811,6 +940,11 @@ const api = createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/emit-interactions.js") {
+      await serveEmitInteractions(res);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/projects") {
       const { project } = await readBody(req);
       if (!project?.name?.trim()) throw new Error("Project name is required.");
@@ -830,6 +964,14 @@ const api = createServer(async (req, res) => {
       if (!projectId) throw new Error("Project is required.");
       if (!scenario?.name?.trim()) throw new Error("Scenario name is required.");
       sendJson(res, 200, await saveScenario(projectId, scenario));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/scenarios/remove") {
+      const { projectId, scenarioId } = await readBody(req);
+      if (!projectId) throw new Error("Project is required.");
+      if (!scenarioId) throw new Error("Scenario is required.");
+      sendJson(res, 200, await removeScenario(projectId, scenarioId));
       return;
     }
 

@@ -69,6 +69,13 @@ wa-page::part(main-content) {
   overflow: hidden;
 }
 
+wa-page::part(main-content) {
+  block-size: 100%;
+  max-block-size: calc(
+    100dvh - var(--banner-height, 0px) - var(--header-height, 0px) - var(--subheader-height, 0px)
+  );
+}
+
 [slot='header'] {
   align-items: center;
   background: var(--wa-color-neutral-on-normal);
@@ -162,18 +169,23 @@ wa-button.action-scenario {
 .app-main {
   box-sizing: border-box;
   block-size: 100%;
+  max-block-size: calc(
+    100dvh - var(--banner-height, 0px) - var(--header-height, 0px) - var(--subheader-height, 0px)
+  );
   display: grid;
-  gap: var(--wa-space-m);
+  gap: 0 var(--wa-space-m);
   grid-template-columns: [header-start video-start footer-start] 1fr [video-end instructions-start] 1fr [instructions-end footer-end header-end];
   grid-template-rows:[header-start] auto [header-end video-start instructions-start] minmax(0, 1fr) [video-end instructions-end footer-start] auto [footer-end];
   min-block-size: 0;
-  padding: var(--wa-space-l);
+  padding:0;
   overflow: hidden;
 }
 
 .header-bar {
   grid-area: header;
   align-self: start;
+  border-block-end: 1px solid var(--wa-color-neutral-border-quiet);
+  padding: var(--wa-space-l);
 }
 
 .header-bar h3 {
@@ -183,7 +195,17 @@ wa-button.action-scenario {
 }
 
 .scenario-description {
-  overflow: auto;
+  max-block-size: 100%;
+  min-block-size: 0;
+}
+
+.scenario-description wa-tree {
+  margin:var(--wa-space-m) 0;
+}
+
+.scenario-description wa-tree-item::part(expand-button) {
+  rotate: 0deg;
+  transition: none;
 }
 
 .capture-area {
@@ -226,11 +248,13 @@ wa-button.action-scenario {
 .action-bar {
   grid-area: footer;
   align-self: end;
+  border-block-start: 1px solid var(--wa-color-neutral-border-quiet);
   display: grid;
   justify-items: center;
   gap: var(--wa-space-s);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 100px), 1fr));
   inline-size: 100%;
+  padding: var(--wa-space-l);
 }
 
 .action-bar wa-button {
@@ -275,6 +299,10 @@ wa-button.action-scenario {
   justify-content: end;
   gap: var(--wa-space-s);
   inline-size: 100%;
+}
+
+.recordings-actions {
+  justify-content: space-between;
 }
 
 .previous-videos-body {
